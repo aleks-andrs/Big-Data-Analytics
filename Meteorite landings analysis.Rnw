@@ -1,0 +1,270 @@
+% !Rnw weave = knitr
+\documentclass{article}
+\title{Meteorite landings}
+\author{by Aleksandrs Rudenoks(1405307)}
+\begin{document}
+\maketitle
+\section*{Introduction}
+This document provides information about an experiment on data exploration with use of a publicly available dataset. The selected dataset is taken from Kaggle website(https://www.kaggle.com/nasa/meteorite-landings). It contains information about location, mass, year and composition for over 45000 meteorites that have fallen to Earth from outer space. Originally, the dataset was downloaded from NASA's Data Portal, and is based on The Meteoritical Bulletin Database.\\\\
+All following tasks are performed using R Studio. The dataset is relevantly small(689KB), therefore, there is no need to use parallel computing techniques(e.g. Hadoop). Such technologies allow processing large datasets across clusters of computers using simple programming models and therefore save time but make no difference when used with small datasets.
+\section*{Objective}
+Purpose of this task is to analise given data, provide visual representation of it and use a machine learning algorithm to make predictions.\\\\
+The main objective of the experement is to visualize the meteorite landings on the map and try to predict, whether the fall of each particular meteorite was seen by humans or it was discovered after the fall.
+\pagebreak
+\section*{Data Exploration}
+Before starting the exploration of the dataset, it is a good idea to have a look at original dataset.\\\\
+Loading dataset.
+<<>>=
+curdir = getwd()
+setwd(curdir)
+
+# get rid of scientific notation
+options(scipen=999)
+
+df <- read.csv('meteorite-landings.csv', header=T,na.strings = c(""))
+@
+The dataset contains the following variables:
+\begin{itemize}
+\item{name: the name of the meteorite}
+\item{id: a unique identifier for the meteorite}
+\item{nametype: one of:}
+\subitem{ valid: a typical meteorite}
+\subitem{relict: a meteorite that has been highly degraded by weather on Earth}
+\item{recclass: the class of the meteorite; one of a large number of classes based on physical, chemical, and other characteristics;}
+\item{mass: the mass of the meteorite, in grams}
+\item{fall: whether the meteorite was seen falling, or was discovered after its impact; one of:}
+\subitem{ Fell: the meteorite's fall was observed}
+\subitem{Found: the meteorite's fall was not observed}
+\item{year: the year the meteorite fell, or the year it was found}
+\item{reclat: the latitude of the meteorite's landing}
+\item{reclong: the longitude of the meteorite's landing}
+\item{GeoLocation: a parentheses-enclose, comma-separated tuple that combines reclat and reclong}
+\end{itemize}
+\pagebreak
+Display variable names.
+<<>>=
+names(df)
+@ 
+Display first 6 rows.
+<<>>=
+head(df)
+@ 
+Display number of rows and columns.
+<<>>=
+cat("Number of rows in the set: ", nrow(df))
+cat("Number of columns in the set: ", ncol(df))
+@ 
+Display unique values in dataset.
+<<>>=
+unq_values <- sapply(df, function(x)length(unique(x)))
+unq_values
+@ 
+\pagebreak
+\section*{Pre-processing}
+
+In order to work with the dataset, some necessary pre-processing steps needs to be applied.\\
+First of all, we make a copy of the dataset, which we are going to work with, and check the information about its structure.
+
+<<>>=
+df_copy <- df
+str(df_copy)
+@
+
+According to Kaggle website, this dataset has either missing or incorrect data. Entries that have latitude and longitude of 0N/0E or have a date that is before 860 CE or after 2016 are incorrect, therefore, should be removed.
+<<>>=
+df_copy <- df_copy[!(df_copy$reclat==0 & df_copy$reclong==0),]
+df_copy <- df_copy[(df_copy$year>=860 & df_copy$year<=2016),]
+df_copy <- df_copy[(df_copy$reclong<=180 & df_copy$reclong>=-180),]
+@
+Then we check for missing values.
+<<>>=
+na_values <- sapply(df_copy, function(x)sum(is.na(x)))
+na_values
+@ 
+And delete rows which contain missing values.
+<<>>=
+df_copy <- df_copy[!is.na(df_copy$reclat),]
+df_copy <- df_copy[!is.na(df_copy$reclong),]
+df_copy <- df_copy[!is.na(df_copy$mass),]
+@
+\pagebreak
+Double check that no missing values left.
+<<>>=
+na_values <- sapply(df_copy, function(x)sum(is.na(x)))
+na_values
+@
+Now we can delete columns that will never be used and display result.
+<<>>=
+df_copy$id <- NULL
+df_copy$GeoLocation <- NULL
+df_copy$mass <- NULL
+df_copy$nametype <- NULL
+str(df_copy)
+@
+The last thing to do is to add rounded coordinates and a new column to our data frame.
+<<>>=
+# rounded latitude and longtitude
+df_copy$roundLat <- round(df_copy$reclat)
+df_copy$roundLong <- round(df_copy$reclong)
+# fell values displayed as 1("Found") and 0("Fell")
+df_copy$newFall <- ifelse(df_copy$fall=="Found",1,0)
+df_copy$newFall <- as.factor(df_copy$newFall)
+@
+We will need this later on.
+Now the dataset is ready to be worked with.
+\pagebreak
+\section*{Visualisation}
+It is always a good idea to visualise the data in the set. Let's have a look at top 5 matereals that meteors are made of.\\
+Full descriprion of elements can be found at (http://class.meteorites.com.au/).\\
+<<>>=
+meteor_types <- sort(table(df_copy$recclass), decreasing = TRUE)[1:5]
+
+barplot(meteor_types, main="Meteor Types", xlab="Elements")
+@
+\pagebreak
+We can also see the distribution of coordinates.\\
+We are going to use rounded coordinates as there are too many unique coordinates in our original dataset and we can't display them all.
+<<>>=
+# original coordinates
+coord_values <- sapply(df_copy[5:6], function(x)length(unique(x)))
+coord_values
+# rounded coordinates
+unq_coord_values <- sapply(df_copy[7:8], function(x)length(unique(x)))
+unq_coord_values
+@
+\pagebreak
+<<>>=
+plot.default(unique(df_copy$roundLat), main = "Distribution of coordinates", ylab = "Latitudes")
+@
+<<>>=
+plot.default(unique(df_copy$roundLong), main = "Distribution of coordinates", ylab = "Longtitudes")
+@
+\pagebreak
+It would be handy to display the map of the world and display all coordinates from the dataset. To do that, library map is used and blue circles are ploted on top of it.
+<<>>=
+# install.packages("maps")
+library(maps)
+map(database = "world")
+# usual coordinates are used for displaying landings
+symbols(df_copy$reclong,df_copy$reclat, bg = "#00F0FF", 
+        circles = rep(1, length(df_copy$reclong)),
+        inches = 0.02, add = TRUE)
+@
+\pagebreak
+\section*{Modelling}
+Now it is time to devide our working dataset into training and testing subsets.
+<<>>=
+library(caret)
+inTrain <- createDataPartition(y=df_copy$newFall, p=.6,list=FALSE)
+training <- df_copy[inTrain,]
+testing <- df_copy[-inTrain,]
+@
+Lets check if number of rows of divided sets match number of rows of the original set.
+<<>>=
+nrow(training) + nrow(testing) == nrow(df_copy)
+@
+Check class distribution on both sets.
+<<>>=
+table(training$newFall)
+table(testing$newFall)
+@
+For our testing and training sets we don't need all of the columns. We can look at them and decide which ones will be used.
+<<>>=
+str(training)
+str(testing)
+@
+For the test we won't need variables name, recclass, fall, reclat, reclong.
+<<>>=
+training$name <- NULL
+training$recclass <- NULL
+training$fall <- NULL
+training$reclat <- NULL
+training$reclong <- NULL
+testing$name <- NULL
+testing$recclass <- NULL
+testing$fall <- NULL
+testing$reclat <- NULL
+testing$reclong <- NULL
+@
+Check remaining columns.
+<<>>=
+str(training)
+str(testing)
+@
+\pagebreak
+For this data processing we will be using machine learning technique called Random Forrest. 
+<<>>=
+library(randomForest)
+memory.limit(size = 25000)
+@
+First of all we need to decide on the number of trees we are going to use with our model. For that we run our model 10 times and record the accuracy for each run so that we can decide the best option for us.
+<<>>=
+# create new dataframe to store accuracy
+ac_df <- data.frame(Ntrees = as.numeric(), Accuracy = as.numeric())
+# initial number of trees
+ntree <- 100
+for (i in 1:10){
+  test_rf1 <- randomForest(newFall~., data = training, ntrees = ntree )
+  testPredict <- predict(test_rf1, newdata = testing)
+  # calculate accuracy of each run
+  auc <- (sum(testPredict==testing$newFall)/nrow(testing))*100
+  # save results in the ac_df data frame
+  ac_df <- rbind(ac_df, data.frame(Ntrees=ntree, Accuracy=auc))
+  # change number of trees for the next run
+  ntree <- ntree + 100
+}
+@
+Display results.
+<<>>=
+ac_df
+@
+We can analyze results in more efficient way by plotting them.
+<<>>=
+library(ggplot2)
+pl <- ggplot(ac_df, aes(x=Ntrees, y=Accuracy))
+pl <- pl + geom_line() + geom_point() + ggtitle("Accuracy according to trees")
+pl <- pl + xlim(100,1000)
+pl <- pl + theme_bw()
+pl
+
+@
+From the output above we can see that accuracy is quite high(98.3 percent) and that number of trees is almost not influencing the accuracy. Therefore, we can use any number of trees for our model.
+\pagebreak
+Lets run our model again with 500 trees and display the results.
+<<>>=
+test_rf <- randomForest(newFall~., data = training, ntree = 500)
+print(test_rf)
+@
+We can have a look at the error against the number of trees. This figure confirms that number of trees is irrelevant to our case.
+<<>>=
+plot(test_rf)
+@
+Another good idea is to analize the importance of variables on which decision is based on.
+<<>>=
+importance(test_rf)
+@
+\pagebreak
+From that figure we can see that year is more important feature than coordinates. That can be explained by fact that nowadays people have more precise options to locate the falling meteorite and share that information with others.\\
+The other two variables are nearly as important as year. This can be explained that some areas are more populated by humans than others and in those places falling meteorites are more likely to be observed.
+<<>>=
+varImpPlot(test_rf)
+@
+\pagebreak
+<<>>=
+# plot the margin of predictions from randomForest classifier
+plot(margin(test_rf, testing$newFall))
+@
+And, finally, we can display the machine prediction on whether the meteorite fall was seen by human and compare it to testing set.
+<<>>=
+testPredict <- predict(test_rf, newdata = testing)
+table(testPredict, testing$newFall)
+@
+\pagebreak
+We can also add a new column to our testing set and compare the predictions against the real data. That perfectly displays the performance of our model.
+<<>>=
+testing$predRight <- testPredict==testing$newFall
+head(testing)
+
+table(testing$predRight)
+@
+\end{document}
